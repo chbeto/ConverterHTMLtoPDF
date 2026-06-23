@@ -6,7 +6,18 @@ services:
     # Necessário para o Chromium headless rodar em container sem privilégios extras.
     init: true
     ports:
-      - "3000:3000"
+      # Exposto só no localhost da VM (não na internet). Use a rede Docker
+      # abaixo para o n8n alcançar pelo nome do container.
+      - "127.0.0.1:3000:3000"
     environment:
       - PORT=3000
     restart: unless-stopped
+    networks:
+      - n8n_net
+
+networks:
+  # Rede já criada pelo stack do n8n. Permite chamar a conversora por
+  # http://converter-html-to-pdf:3000/convert a partir dos containers n8n.
+  n8n_net:
+    external: true
+    name: n8n_default
