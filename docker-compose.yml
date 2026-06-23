@@ -1,0 +1,14 @@
+services:
+  html-to-pdf:
+    build: .
+    container_name: converter-html-to-pdf
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      # Tempo de vida dos links de download (ms). Padrão: 10 minutos.
+      - DOWNLOAD_TTL_MS=600000
+      # Defina a URL pública se estiver atrás de um proxy/reverso para os links
+      # de download ficarem corretos. Ex.: https://pdf.meudominio.com
+      # - PUBLIC_URL=https://pdf.meudominio.com
+    restart: unless-stopped
