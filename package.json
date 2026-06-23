@@ -8,7 +8,7 @@
     "test:local": "node scripts/test-local.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
   },
   "dependencies": {
     "@sparticuz/chromium": "^131.0.1",
