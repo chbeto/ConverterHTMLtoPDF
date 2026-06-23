@@ -1,18 +1,21 @@
-# Converter HTML to PDF (Vercel)
+# Converter HTML to PDF
 
-Função **serverless na Vercel** que converte HTML em PDF e devolve o arquivo
-**direto para download**. Sem banco de dados, sem armazenamento: você envia o
-HTML, recebe o PDF. Pensada para ser chamada pelo **n8n** (nó *HTTP Request*),
-mas funciona com qualquer cliente HTTP.
+API HTTP self-hosted que **converte HTML em PDF** e devolve o arquivo
+**direto para download**. Sem banco de dados: você envia o HTML, recebe o PDF.
+Pensada para ser chamada pelo **n8n** (nó *HTTP Request*).
 
-A renderização usa **`puppeteer-core` + `@sparticuz/chromium`**, um build do
-Chromium compatível com o ambiente serverless da Vercel.
+A renderização usa **Puppeteer (Chrome headless)** via imagem oficial, que já
+inclui o Chrome e todas as bibliotecas de sistema — sem dor de cabeça com
+`libnss3` e afins.
 
 ---
 
-## Endpoint
+## Endpoints
 
-### `POST /api/convert`
+### `GET /health`
+Verificação de saúde. Retorna `{ "status": "ok" }`.
+
+### `POST /convert`
 Converte e devolve o PDF no corpo da resposta (`application/pdf`,
 `Content-Disposition: attachment`).
 
@@ -32,14 +35,62 @@ Converte e devolve o PDF no corpo da resposta (`application/pdf`,
 Também aceita o HTML puro no corpo com `Content-Type: text/html`.
 
 ### Página de teste
-Há uma página em `/` (`public/index.html`) com um formulário simples para colar
-HTML, gerar e baixar o PDF.
+Acesse `http://SEU_HOST:3000/` para um formulário simples de teste.
+
+---
+
+## Subindo na VM (Docker — recomendado)
+
+Na VM (ex.: droplet da DigitalOcean), com Docker + Docker Compose instalados:
+
+```bash
+git clone https://github.com/chbeto/ConverterHTMLtoPDF.git
+cd ConverterHTMLtoPDF
+docker compose up -d --build
+```
+
+A API sobe em `http://SEU_IP:3000`. Teste:
+```bash
+curl http://localhost:3000/health
+```
+
+Para ver logs / parar:
+```bash
+docker compose logs -f
+docker compose down
+```
+
+### Integração com o n8n na mesma VM
+- Se o **n8n também roda em Docker**, coloque os dois na mesma rede e use o nome
+  do serviço como host. Exemplo no `docker-compose.yml` do n8n: adicione este
+  serviço (ou uma rede externa compartilhada) e chame
+  `http://html-to-pdf:3000/convert` a partir do n8n.
+- Se o n8n roda direto na VM (sem Docker), use `http://localhost:3000/convert`
+  ou `http://IP_DA_VM:3000/convert`.
+
+> **Firewall:** se for acessar de fora da VM, libere a porta `3000`
+> (`ufw allow 3000`). Para uso só interno (n8n na mesma VM), **não** exponha a
+> porta publicamente.
+
+---
+
+## Subindo sem Docker (Node + PM2)
+
+Requer Node.js 18+ e as dependências de sistema do Chromium. Em Ubuntu/Debian:
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+  libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0
+
+git clone https://github.com/chbeto/ConverterHTMLtoPDF.git
+cd ConverterHTMLtoPDF
+npm install
+npm start            # ou: pm2 start npm --name html2pdf -- start
+```
 
 ---
 
 ## Opções de PDF (`options`)
-
-Repassadas ao Puppeteer:
 
 | Campo                 | Descrição                                   | Padrão        |
 |-----------------------|---------------------------------------------|---------------|
@@ -54,77 +105,36 @@ Repassadas ao Puppeteer:
 
 ---
 
-## Publicando na Vercel
+## Variáveis de ambiente
 
-### Pela interface
-1. Faça push deste repositório para o GitHub.
-2. Na Vercel, **Add New → Project** e importe o repositório.
-3. Não precisa configurar build: a Vercel detecta a função em `api/` e a página
-   estática em `public/`. Clique em **Deploy**.
-
-### Pela CLI
-```bash
-npm i -g vercel
-vercel        # ambiente de preview
-vercel --prod # produção
-```
-
-A função fica disponível em `https://SEU-PROJETO.vercel.app/api/convert`.
-
-> **Configuração** (`vercel.json`): a função usa `memory: 1024` e
-> `maxDuration: 60`, recomendado para o Chromium. No plano Hobby esses são os
-> limites máximos; ajuste conforme seu plano.
+| Variável     | Descrição                              | Padrão  |
+|--------------|----------------------------------------|---------|
+| `PORT`       | Porta HTTP                             | `3000`  |
+| `BODY_LIMIT` | Tamanho máximo do corpo da requisição  | `25mb`  |
 
 ---
 
 ## Usando no n8n
 
 1. Adicione um nó **HTTP Request**.
-2. **Method:** `POST` · **URL:** `https://SEU-PROJETO.vercel.app/api/convert`
-3. **Body Content Type:** `JSON` ·
-   `{ "html": "{{ $json.html }}", "filename": "documento.pdf" }`
+2. **Method:** `POST` · **URL:** `http://HOST:3000/convert`
+3. **Body Content Type:** `JSON`. Para evitar erro de JSON inválido com HTML que
+   tem quebras de linha, use **Specify Body → Using JSON** com uma expressão:
+   ```
+   {{ { "html": $json.htmlCompleto, "filename": "proposta.pdf" } }}
+   ```
 4. Em **Options → Response → Response Format**, selecione **File** (binário).
 
 O PDF chega como dado binário e pode seguir para *Write Binary File*, e-mail,
-Google Drive, Telegram, etc. Não há etapa de download separada — a própria
-resposta já é o arquivo.
+Google Drive, Telegram, etc.
 
 ---
 
 ## Teste rápido (cURL)
 
 ```bash
-curl -X POST https://SEU-PROJETO.vercel.app/api/convert \
+curl -X POST http://localhost:3000/convert \
   -H "Content-Type: application/json" \
   -d '{"html":"<h1>Teste</h1>","filename":"teste.pdf"}' \
   --output teste.pdf
-```
-
----
-
-## Desenvolvimento local
-
-Testar só a renderização (gera `saida-teste.pdf`):
-```bash
-npm install
-npm run test:local
-```
-
-Rodar a função como na Vercel (requer a CLI da Vercel):
-```bash
-vercel dev
-```
-> Localmente, se preferir usar um Chrome já instalado, defina
-> `CHROME_EXECUTABLE_PATH` apontando para o executável.
-
----
-
-## Estrutura
-
-```
-api/convert.js      Função serverless (POST → PDF)
-lib/pdf.js          Renderização HTML → PDF (puppeteer-core + @sparticuz/chromium)
-public/index.html   Página de teste com formulário
-scripts/test-local.js  Teste de renderização sem a Vercel
-vercel.json         Memória e timeout da função
 ```

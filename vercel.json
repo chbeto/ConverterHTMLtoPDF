@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/convert.js": {
-      "maxDuration": 60,
-      "memory": 1024
-    }
-  }
-}

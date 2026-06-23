@@ -1,0 +1,12 @@
+services:
+  html-to-pdf:
+    build: .
+    image: converter-html-to-pdf
+    container_name: converter-html-to-pdf
+    # Necessário para o Chromium headless rodar em container sem privilégios extras.
+    init: true
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    restart: unless-stopped

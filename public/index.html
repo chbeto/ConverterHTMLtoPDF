@@ -18,7 +18,7 @@
 </head>
 <body>
   <h1>HTML → PDF</h1>
-  <p class="sub">Cole seu HTML, gere e baixe o PDF. Endpoint: <code>POST /api/convert</code></p>
+  <p class="sub">Cole seu HTML, gere e baixe o PDF. Endpoint: <code>POST /convert</code></p>
 
   <textarea id="html">&lt;h1&gt;Olá, mundo!&lt;/h1&gt;
 &lt;p&gt;Este PDF foi gerado a partir de HTML.&lt;/p&gt;</textarea>
@@ -34,7 +34,7 @@
     btn.addEventListener("click", async () => {
       btn.disabled = true; btn.textContent = "Gerando...";
       try {
-        const resp = await fetch("/api/convert", {
+        const resp = await fetch("/convert", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
