@@ -378,7 +378,10 @@ da conversora e rode `docker compose up -d`.
 | Name   | `x-api-key`                  |
 | Value  | a chave gerada com `openssl rand -hex 32` |
 
-Dê um nome tipo `HTML2PDF – API Key`.
+> **`Name` é o nome do cabeçalho HTTP**, não o apelido da credencial — tem que
+> ser exatamente `x-api-key`. O nome da credencial (algo como
+> `HTML2PDF – API Key`) fica no título do modal, lá em cima. Trocar os dois de
+> lugar dá `Header name must be a valid HTTP token`.
 
 **b) Nó HTTP Request**
 
@@ -470,6 +473,7 @@ npm start            # ou: pm2 start npm --name html2pdf -- start
 | Erro **524** / timeout vindo do Cloudflare | Renderização passou de ~100s no proxy do Cloudflare. Use o subdomínio como *DNS only* ou reduza o HTML. |
 | Loop de redirecionamento (`ERR_TOO_MANY_REDIRECTS`) | Cloudflare em modo *Flexible*. Troque para **Full (strict)**. |
 | Chamada externa dá timeout / não conecta | Porta publicada só no localhost. Defina `BIND_ADDRESS=0.0.0.0` no `.env` (ou use Nginx) e confira também o firewall do provedor (Security Group / Cloud Firewall). |
+| n8n: `Header name must be a valid HTTP token` | Na credencial *Header Auth*, o campo **Name** recebeu o apelido da credencial. Ele é o nome do cabeçalho: `x-api-key`. |
 | `401 Não autorizado` em `/convert` | `API_KEY` está definida e a requisição não mandou o header `x-api-key` (no n8n: *Options → Headers*). |
 | Fechei com `ufw deny 3000` e continua acessível | Portas publicadas pelo Docker passam por cima do ufw. Volte `BIND_ADDRESS` para `127.0.0.1` e rode `docker compose up -d`. |
 | Navegador acusa erro de CORS | Defina `CORS_ORIGIN` com a origem da página que chama a API. |
