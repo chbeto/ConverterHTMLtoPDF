@@ -89,15 +89,33 @@ openssl rand -hex 32        # copie o resultado para API_KEY no .env
 ### Opção A — Nginx com HTTPS (recomendado)
 
 O container continua fechado no `127.0.0.1` e só o Nginx fica exposto (80/443),
-com certificado válido:
+com certificado válido.
+
+**Pré-requisito:** um registro **A** do subdomínio apontando para o IP público
+da VM (`curl -4 ifconfig.me`). Confira com `dig +short SEU.DOMINIO` antes de
+seguir — sem isso o certbot falha com `NXDOMAIN`.
+
+Com o DNS no ar, um comando faz o resto (vhost + certificado + verificação):
+
+```bash
+sudo bash deploy/setup-https.sh pdf.seudominio.com.br
+```
+
+O script checa o serviço no `127.0.0.1:3000`, resolve o DNS, escreve o vhost,
+chama o certbot e confirma no fim que `https://SEU.DOMINIO/health` responde.
+É idempotente e mexe só no vhost `html2pdf`, sem tocar nos outros sites da VM.
+
+<details>
+<summary>Fazendo na mão</summary>
 
 ```bash
 sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/html2pdf
 sudo nano /etc/nginx/sites-available/html2pdf     # troque o server_name
-sudo ln -s /etc/nginx/sites-available/html2pdf /etc/nginx/sites-enabled/
+sudo ln -sfn /etc/nginx/sites-available/html2pdf /etc/nginx/sites-enabled/html2pdf
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d pdf.seudominio.com.br
 ```
+</details>
 
 No `.env`, mantenha `BIND_ADDRESS=127.0.0.1` e defina `TRUST_PROXY=1` (para o
 IP real do cliente aparecer nos logs). Aplique com `docker compose up -d`.
@@ -124,6 +142,39 @@ curl -X POST https://pdf.seudominio.com.br/convert \
 >
 > Não é preciso mexer no site `default` (onde costumam morar os outros serviços
 > da VM): o Nginx casa o `server_name` antes de cair no `default_server`.
+
+### Trocando o domínio / recomeçando do zero
+
+Se um domínio errado chegou a ser configurado, limpe **nesta ordem** (remover o
+certificado antes de tirar as referências dele quebra o `nginx -t`):
+
+```bash
+# 1. Backup dos configs
+sudo cp -a /etc/nginx/sites-available /root/nginx-backup-$(date +%F-%H%M)
+
+# 2. Onde o domínio antigo aparece?
+sudo grep -rn "dominio-antigo" /etc/nginx/sites-available/ /etc/nginx/sites-enabled/
+
+# 3. Tire as linhas do domínio antigo (o certbot pode ter escrito no site
+#    'default'; apague só as linhas dele, preservando os outros serviços)
+sudo nano /etc/nginx/sites-available/default
+sudo rm -f /etc/nginx/sites-enabled/html2pdf /etc/nginx/sites-available/html2pdf
+
+# 4. Valide ANTES de remover o certificado
+sudo nginx -t && sudo systemctl reload nginx
+
+# 5. Agora sim, remova o certificado órfão
+sudo certbot certificates                       # lista o que existe
+sudo certbot delete --cert-name dominio-antigo
+
+# 6. Apague o registro DNS antigo no painel e crie o novo
+```
+
+Depois é só rodar o setup com o domínio certo:
+
+```bash
+sudo bash deploy/setup-https.sh pdf.seudominio.com.br
+```
 
 ### Domínio atrás do Cloudflare
 
@@ -422,6 +473,7 @@ scripts/test-local.js  Teste de renderização sem subir o servidor
 Dockerfile          Imagem baseada em ghcr.io/puppeteer/puppeteer
 docker-compose.yml  Orquestração + rede compartilhada com o n8n
 .env.example        Modelo de configuração (exposição, API_KEY, CORS)
+deploy/setup-https.sh          Publica em um domínio com HTTPS (vhost + certbot + teste)
 deploy/nginx.conf.example      Proxy reverso (HTTP) para o certbot emitir o certificado
 deploy/nginx-ssl.conf.example  Vhost HTTPS pronto, para depois da emissão
 ```
