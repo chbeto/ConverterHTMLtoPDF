@@ -149,8 +149,10 @@ Se um domínio errado chegou a ser configurado, limpe **nesta ordem** (remover o
 certificado antes de tirar as referências dele quebra o `nginx -t`):
 
 ```bash
-# 1. Backup dos configs
-sudo cp -a /etc/nginx/sites-available /root/nginx-backup-$(date +%F-%H%M)
+# 1. Backup dos configs (em /etc para conseguir listar sem sudo depois;
+#    dentro de /root o shell do seu usuário não consegue nem expandir o *)
+sudo cp -a /etc/nginx /etc/nginx.bak-$(date +%F-%H%M)
+ls -d /etc/nginx.bak-*
 
 # 2. Onde o domínio antigo aparece?
 sudo grep -rn "dominio-antigo" /etc/nginx/sites-available/ /etc/nginx/sites-enabled/
