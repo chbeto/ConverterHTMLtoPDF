@@ -155,9 +155,12 @@ sudo cp -a /etc/nginx/sites-available /root/nginx-backup-$(date +%F-%H%M)
 # 2. Onde o domínio antigo aparece?
 sudo grep -rn "dominio-antigo" /etc/nginx/sites-available/ /etc/nginx/sites-enabled/
 
-# 3. Tire as linhas do domínio antigo (o certbot pode ter escrito no site
-#    'default'; apague só as linhas dele, preservando os outros serviços)
-sudo nano /etc/nginx/sites-available/default
+# 3. Tire as referências ao domínio antigo. NÃO use `sed -i '/dominio/d'`: o
+#    certbot escreve blocos `if ($host = dominio) { ... }` e apagar só a linha
+#    de abertura deixa a chave órfã. Este limpador entende as chaves:
+sudo python3 deploy/clean-nginx-domain.py dominio-antigo /etc/nginx/sites-available/default
+#    confira a prévia acima e, se estiver certa, aplique com -i:
+sudo python3 deploy/clean-nginx-domain.py dominio-antigo /etc/nginx/sites-available/default -i
 sudo rm -f /etc/nginx/sites-enabled/html2pdf /etc/nginx/sites-available/html2pdf
 
 # 4. Valide ANTES de remover o certificado
@@ -459,6 +462,7 @@ npm start            # ou: pm2 start npm --name html2pdf -- start
 | certbot: `NXDOMAIN looking up A for ...` | O subdomínio não existe no DNS. Crie um registro **A** apontando para o IP público da VM (`curl -4 ifconfig.me`), confirme com `dig +short SEU_DOMINIO` e rode o certbot de novo. |
 | certbot: `Timeout during connect` / falha no desafio | O DNS existe mas a porta 80 não chega até o Nginx. Libere 80 e 443 no firewall do provedor e no `ufw`. |
 | `ln: failed to create symbolic link ... File exists` | O symlink do Nginx já estava criado. Pode ignorar — mas confira para onde ele aponta: `ls -la /etc/nginx/sites-enabled/`. |
+| `nginx: [emerg] "listen" directive is not allowed here` | Alguém apagou linhas soltas de um bloco `if ($host = ...) { ... }` e a chave de fechamento ficou órfã. Restaure o backup do arquivo e use `deploy/clean-nginx-domain.py`. |
 | `nginx: [emerg] cannot load certificate ... No such file or directory` | O certificado foi apagado mas ainda há um vhost apontando para ele — isso derruba o `nginx -t` inteiro. Ache com `sudo grep -rn "ssl_certificate" /etc/nginx/sites-enabled/` e remova as linhas órfãs (mais o `listen 443 ssl` do bloco, se ele ficar sem certificado). |
 | `404 Not Found` do Nginx no domínio, após o certbot | O certificado foi instalado no site `default`. Aplique o `deploy/nginx-ssl.conf.example` (veja a Opção A). |
 | Erro **524** / timeout vindo do Cloudflare | Renderização passou de ~100s no proxy do Cloudflare. Use o subdomínio como *DNS only* ou reduza o HTML. |
@@ -479,6 +483,7 @@ Dockerfile          Imagem baseada em ghcr.io/puppeteer/puppeteer
 docker-compose.yml  Orquestração + rede compartilhada com o n8n
 .env.example        Modelo de configuração (exposição, API_KEY, CORS)
 deploy/setup-https.sh          Publica em um domínio com HTTPS (vhost + certbot + teste)
+deploy/clean-nginx-domain.py   Remove um dominio da config do Nginx sem quebrar chaves
 deploy/nginx.conf.example      Proxy reverso (HTTP) para o certbot emitir o certificado
 deploy/nginx-ssl.conf.example  Vhost HTTPS pronto, para depois da emissão
 ```
