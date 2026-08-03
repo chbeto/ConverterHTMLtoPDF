@@ -209,6 +209,11 @@ e baixar o PDF.
 
 ## Integração com o n8n
 
+Escolha o cenário:
+
+- **n8n na mesma VM** → seções 1 e 2 abaixo (rede Docker, sem passar pela internet).
+- **n8n em outra VM** → pule para [n8n em outra VM](#3-n8n-em-outra-vm).
+
 ### 1. Conectar a conversora à rede do n8n (n8n em Docker)
 
 Para o n8n chamar a conversora **pelo nome do container** (sem depender de IP),
@@ -261,6 +266,47 @@ Google Drive, Telegram, etc.
 > **Dica:** se montar o corpo manualmente em texto e o HTML tiver quebras de
 > linha, o n8n acusa "not valid JSON". Use a forma de objeto/expressão acima,
 > que serializa e escapa tudo automaticamente.
+
+### 3. n8n em outra VM
+
+Aqui a rede Docker não ajuda: a chamada sai pela internet. Publique a conversora
+pela [Opção A](#opção-a--nginx-com-https-recomendado) (Nginx + HTTPS + `API_KEY`)
+e aponte o n8n para o domínio.
+
+**Antes de mexer no n8n**, confirme da VM do n8n que o serviço responde:
+
+```bash
+curl https://pdfconv.seudominio.com.br/health
+# {"status":"ok","uptime":...,"auth":true}   <- auth:true confirma a API_KEY ativa
+```
+
+Se `auth` vier `false`, o `.env` não foi lido: confira `API_KEY` no `.env` da VM
+da conversora e rode `docker compose up -d`.
+
+**a) Credencial (guarda a chave fora do workflow)**
+
+*Credentials → New → Header Auth*:
+
+| Campo  | Valor                        |
+|--------|------------------------------|
+| Name   | `x-api-key`                  |
+| Value  | a chave gerada com `openssl rand -hex 32` |
+
+Dê um nome tipo `HTML2PDF – API Key`.
+
+**b) Nó HTTP Request**
+
+- **Method:** `POST`
+- **URL:** `https://pdfconv.seudominio.com.br/convert`
+- **Authentication:** `Generic Credential Type` → `Header Auth` → a credencial criada
+- **Body Content Type:** `JSON` → *Specify Body → Using JSON*, com expressão:
+  ```
+  {{ { "html": $json.htmlCompleto, "filename": "proposta.pdf" } }}
+  ```
+- **Options → Response → Response Format:** **File** (binário)
+- **Options → Timeout:** `120000` (ms) — HTML pesado pode passar dos 30s padrão
+
+Sempre `https://`. Em HTTP puro a chave viajaria em texto claro pela internet.
 
 ---
 
@@ -329,6 +375,9 @@ npm start            # ou: pm2 start npm --name html2pdf -- start
 | n8n: *"The value in the JSON Body field is not valid JSON"* | HTML com quebras de linha montado como texto. Use a expressão de objeto no body (seção n8n). |
 | n8n não conecta (`ECONNREFUSED`/timeout) | n8n em Docker usando `localhost`. Use o nome do container na rede compartilhada: `http://converter-html-to-pdf:3000/convert`. |
 | PDF vem corrompido / como texto | Faltou definir **Response Format = File** no nó HTTP Request. |
+| certbot: `NXDOMAIN looking up A for ...` | O subdomínio não existe no DNS. Crie um registro **A** apontando para o IP público da VM (`curl -4 ifconfig.me`), confirme com `dig +short SEU_DOMINIO` e rode o certbot de novo. |
+| certbot: `Timeout during connect` / falha no desafio | O DNS existe mas a porta 80 não chega até o Nginx. Libere 80 e 443 no firewall do provedor e no `ufw`. |
+| `ln: failed to create symbolic link ... File exists` | O symlink do Nginx já estava criado. Pode ignorar. |
 | Chamada externa dá timeout / não conecta | Porta publicada só no localhost. Defina `BIND_ADDRESS=0.0.0.0` no `.env` (ou use Nginx) e confira também o firewall do provedor (Security Group / Cloud Firewall). |
 | `401 Não autorizado` em `/convert` | `API_KEY` está definida e a requisição não mandou o header `x-api-key` (no n8n: *Options → Headers*). |
 | Fechei com `ufw deny 3000` e continua acessível | Portas publicadas pelo Docker passam por cima do ufw. Volte `BIND_ADDRESS` para `127.0.0.1` e rode `docker compose up -d`. |
