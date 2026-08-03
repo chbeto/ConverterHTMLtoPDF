@@ -24,6 +24,30 @@ info() { echo "==> $*"; }
 command -v nginx >/dev/null || die "nginx não encontrado (sudo apt install nginx)."
 command -v certbot >/dev/null || die "certbot não encontrado (sudo apt install certbot python3-certbot-nginx)."
 
+# --- 0. A configuração atual do Nginx está sã? --------------------------------
+# Se já houver algo quebrado (tipicamente um vhost apontando para certificado
+# que foi apagado), qualquer 'nginx -t' falha e nada aqui adianta.
+info "Validando a configuração atual do Nginx"
+if ! nginx -t 2>/tmp/setup-https-nginx.err; then
+  cat /tmp/setup-https-nginx.err >&2
+  echo >&2
+  echo "A configuração do Nginx JÁ ESTAVA quebrada antes deste script." >&2
+  MISSING=0
+  while IFS=: read -r file line rest; do
+    certpath="$(echo "$rest" | sed -E 's/.*ssl_certificate(_key)?[[:space:]]+([^;]+);.*/\2/')"
+    if [ -n "$certpath" ] && [ ! -f "$certpath" ]; then
+      echo "  $file:$line aponta para um certificado inexistente: $certpath" >&2
+      MISSING=1
+    fi
+  done < <(grep -rn "ssl_certificate" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null || true)
+  if [ "$MISSING" = "1" ]; then
+    echo >&2
+    echo "Remova as linhas acima (e o 'listen 443 ssl' do mesmo bloco, se ele" >&2
+    echo "ficar sem certificado), rode 'sudo nginx -t' e chame este script de novo." >&2
+  fi
+  die "corrija a configuração existente antes de continuar."
+fi
+
 # --- 1. O serviço está de pé no localhost? ------------------------------------
 info "Checando a conversora em 127.0.0.1:3000"
 HEALTH="$(curl -fsS --max-time 5 http://127.0.0.1:3000/health || true)"
@@ -31,7 +55,13 @@ HEALTH="$(curl -fsS --max-time 5 http://127.0.0.1:3000/health || true)"
 echo "    $HEALTH"
 case "$HEALTH" in
   *'"auth":true'*) ;;
-  *) echo "    AVISO: sem API_KEY — qualquer um que alcançar o domínio poderá gerar PDFs." ;;
+  *)
+    echo "    Sem API_KEY: publicar assim deixa a conversora aberta para qualquer um" >&2
+    echo "    que alcance o domínio, inclusive para buscar URLs da sua rede interna." >&2
+    echo "    Defina API_KEY no .env e rode 'docker compose up -d'." >&2
+    [ "${ALLOW_NO_AUTH:-}" = "1" ] || die "abortando. Para publicar mesmo assim: ALLOW_NO_AUTH=1 sudo -E bash $0 $DOMAIN"
+    echo "    ALLOW_NO_AUTH=1 definido — seguindo sem autenticação."
+    ;;
 esac
 
 # --- 2. O DNS aponta para algum lugar? ----------------------------------------

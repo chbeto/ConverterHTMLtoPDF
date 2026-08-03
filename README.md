@@ -170,6 +170,10 @@ sudo certbot delete --cert-name dominio-antigo
 # 6. Apague o registro DNS antigo no painel e crie o novo
 ```
 
+> Se o certificado já foi apagado **antes** dos passos 3 e 4, o `nginx -t` passa
+> a falhar com `cannot load certificate ... No such file or directory` e nenhum
+> site recarrega. É o mesmo conserto: tire as linhas órfãs e valide de novo.
+
 Depois é só rodar o setup com o domínio certo:
 
 ```bash
@@ -455,6 +459,7 @@ npm start            # ou: pm2 start npm --name html2pdf -- start
 | certbot: `NXDOMAIN looking up A for ...` | O subdomínio não existe no DNS. Crie um registro **A** apontando para o IP público da VM (`curl -4 ifconfig.me`), confirme com `dig +short SEU_DOMINIO` e rode o certbot de novo. |
 | certbot: `Timeout during connect` / falha no desafio | O DNS existe mas a porta 80 não chega até o Nginx. Libere 80 e 443 no firewall do provedor e no `ufw`. |
 | `ln: failed to create symbolic link ... File exists` | O symlink do Nginx já estava criado. Pode ignorar — mas confira para onde ele aponta: `ls -la /etc/nginx/sites-enabled/`. |
+| `nginx: [emerg] cannot load certificate ... No such file or directory` | O certificado foi apagado mas ainda há um vhost apontando para ele — isso derruba o `nginx -t` inteiro. Ache com `sudo grep -rn "ssl_certificate" /etc/nginx/sites-enabled/` e remova as linhas órfãs (mais o `listen 443 ssl` do bloco, se ele ficar sem certificado). |
 | `404 Not Found` do Nginx no domínio, após o certbot | O certificado foi instalado no site `default`. Aplique o `deploy/nginx-ssl.conf.example` (veja a Opção A). |
 | Erro **524** / timeout vindo do Cloudflare | Renderização passou de ~100s no proxy do Cloudflare. Use o subdomínio como *DNS only* ou reduza o HTML. |
 | Loop de redirecionamento (`ERR_TOO_MANY_REDIRECTS`) | Cloudflare em modo *Flexible*. Troque para **Full (strict)**. |
