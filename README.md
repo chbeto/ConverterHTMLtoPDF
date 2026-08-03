@@ -110,6 +110,32 @@ curl -X POST https://pdf.seudominio.com.br/convert \
   -d '{"html":"<h1>Teste</h1>"}' --output teste.pdf
 ```
 
+> **Se o certbot disser `deployed certificate to .../sites-enabled/default`**,
+> ele não achou o bloco da conversora e colocou o certificado no site padrão —
+> o domínio vai responder **404**. Use o vhost pronto de HTTPS:
+>
+> ```bash
+> sudo cp deploy/nginx-ssl.conf.example /etc/nginx/sites-available/html2pdf
+> sudo sed -i 's/pdf.seudominio.com.br/SEU.DOMINIO.COM.BR/g' \
+>      /etc/nginx/sites-available/html2pdf
+> sudo ln -sf /etc/nginx/sites-available/html2pdf /etc/nginx/sites-enabled/html2pdf
+> sudo nginx -t && sudo systemctl reload nginx
+> ```
+>
+> Não é preciso mexer no site `default` (onde costumam morar os outros serviços
+> da VM): o Nginx casa o `server_name` antes de cair no `default_server`.
+
+### Domínio atrás do Cloudflare
+
+Se o DNS estiver **proxied** (nuvem laranja — o `dig` devolve IPs `104.x`/`172.67.x`
+em vez do IP da VM), tudo funciona, com dois ajustes:
+
+- Em *SSL/TLS → Overview*, use **Full (strict)**. Em modo *Flexible* o Cloudflare
+  fala HTTP com a origem e o redirect 80→443 vira loop.
+- O Cloudflare corta conexões em ~100s (erro **524**). Conversões muito pesadas
+  podem estourar isso; nesse caso, use um subdomínio **DNS only** (nuvem cinza)
+  para a conversora.
+
 ### Opção B — publicar a porta direto
 
 Sem domínio/HTTPS, expondo a `3000` na internet. No `.env`:
@@ -377,7 +403,10 @@ npm start            # ou: pm2 start npm --name html2pdf -- start
 | PDF vem corrompido / como texto | Faltou definir **Response Format = File** no nó HTTP Request. |
 | certbot: `NXDOMAIN looking up A for ...` | O subdomínio não existe no DNS. Crie um registro **A** apontando para o IP público da VM (`curl -4 ifconfig.me`), confirme com `dig +short SEU_DOMINIO` e rode o certbot de novo. |
 | certbot: `Timeout during connect` / falha no desafio | O DNS existe mas a porta 80 não chega até o Nginx. Libere 80 e 443 no firewall do provedor e no `ufw`. |
-| `ln: failed to create symbolic link ... File exists` | O symlink do Nginx já estava criado. Pode ignorar. |
+| `ln: failed to create symbolic link ... File exists` | O symlink do Nginx já estava criado. Pode ignorar — mas confira para onde ele aponta: `ls -la /etc/nginx/sites-enabled/`. |
+| `404 Not Found` do Nginx no domínio, após o certbot | O certificado foi instalado no site `default`. Aplique o `deploy/nginx-ssl.conf.example` (veja a Opção A). |
+| Erro **524** / timeout vindo do Cloudflare | Renderização passou de ~100s no proxy do Cloudflare. Use o subdomínio como *DNS only* ou reduza o HTML. |
+| Loop de redirecionamento (`ERR_TOO_MANY_REDIRECTS`) | Cloudflare em modo *Flexible*. Troque para **Full (strict)**. |
 | Chamada externa dá timeout / não conecta | Porta publicada só no localhost. Defina `BIND_ADDRESS=0.0.0.0` no `.env` (ou use Nginx) e confira também o firewall do provedor (Security Group / Cloud Firewall). |
 | `401 Não autorizado` em `/convert` | `API_KEY` está definida e a requisição não mandou o header `x-api-key` (no n8n: *Options → Headers*). |
 | Fechei com `ufw deny 3000` e continua acessível | Portas publicadas pelo Docker passam por cima do ufw. Volte `BIND_ADDRESS` para `127.0.0.1` e rode `docker compose up -d`. |
@@ -393,5 +422,6 @@ scripts/test-local.js  Teste de renderização sem subir o servidor
 Dockerfile          Imagem baseada em ghcr.io/puppeteer/puppeteer
 docker-compose.yml  Orquestração + rede compartilhada com o n8n
 .env.example        Modelo de configuração (exposição, API_KEY, CORS)
-deploy/nginx.conf.example  Proxy reverso com HTTPS para acesso externo
+deploy/nginx.conf.example      Proxy reverso (HTTP) para o certbot emitir o certificado
+deploy/nginx-ssl.conf.example  Vhost HTTPS pronto, para depois da emissão
 ```

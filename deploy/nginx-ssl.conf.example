@@ -1,0 +1,64 @@
+# Vhost HTTPS da conversora, para usar DEPOIS que o certbot já emitiu o
+# certificado (ou quando ele instalou o certificado no server block errado —
+# sintoma clássico: "deployed certificate to /etc/nginx/sites-enabled/default"
+# e 404 ao acessar o domínio).
+#
+# Uso:
+#   sudo cp deploy/nginx-ssl.conf.example /etc/nginx/sites-available/html2pdf
+#   sudo sed -i 's/pdf.seudominio.com.br/SEU.DOMINIO.COM.BR/g' \
+#        /etc/nginx/sites-available/html2pdf
+#   sudo ln -sf /etc/nginx/sites-available/html2pdf /etc/nginx/sites-enabled/html2pdf
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Não é preciso mexer no site "default": o Nginx casa o server_name antes de
+# cair no default_server, então este bloco passa a atender o domínio. Isso
+# preserva os outros sites da VM (n8n, etc.) que vivem no default.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name pdf.seudominio.com.br;
+
+    # Deixa o webroot do certbot passar e manda o resto para o HTTPS.
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    # http2 no listen é a sintaxe do nginx < 1.25. Em versões novas, troque por
+    # "listen 443 ssl;" mais uma linha "http2 on;".
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name pdf.seudominio.com.br;
+
+    ssl_certificate     /etc/letsencrypt/live/pdf.seudominio.com.br/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pdf.seudominio.com.br/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # HTML de entrada e PDF de saída podem ser grandes.
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # A renderização do Chromium pode passar de 60s em páginas pesadas.
+        proxy_connect_timeout 30s;
+        proxy_send_timeout    180s;
+        proxy_read_timeout    180s;
+
+        # Entrega o PDF sem bufferizar o corpo inteiro em disco.
+        proxy_buffering off;
+    }
+}
