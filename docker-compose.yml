@@ -6,11 +6,21 @@ services:
     # Necessário para o Chromium headless rodar em container sem privilégios extras.
     init: true
     ports:
-      # Exposto só no localhost da VM (não na internet). Use a rede Docker
-      # abaixo para o n8n alcançar pelo nome do container.
-      - "127.0.0.1:3000:3000"
+      # As variáveis abaixo vêm do arquivo .env (veja .env.example).
+      # BIND_ADDRESS controla quem alcança a porta:
+      #   127.0.0.1 (padrão) -> só a própria VM   |   0.0.0.0 -> qualquer origem
+      # Atenção: portas publicadas pelo Docker entram no iptables ANTES do ufw,
+      # então "ufw deny 3000" NÃO bloqueia esta porta. O caminho recomendado é
+      # manter 127.0.0.1 e expor via Nginx (veja deploy/nginx.conf.example).
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-3000}:3000"
     environment:
       - PORT=3000
+      # Se definida, /convert passa a exigir o header 'x-api-key'.
+      - API_KEY=${API_KEY:-}
+      # Origens liberadas para chamadas de navegador (ex.: https://app.exemplo.com).
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
+      # Atrás de proxy reverso, para logar o IP real do cliente.
+      - TRUST_PROXY=${TRUST_PROXY:-}
     restart: unless-stopped
     networks:
       - n8n_net

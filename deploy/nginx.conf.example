@@ -1,0 +1,39 @@
+# Proxy reverso para expor a conversora na internet com HTTPS.
+#
+# Uso:
+#   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/html2pdf
+#   sudo ln -s /etc/nginx/sites-available/html2pdf /etc/nginx/sites-enabled/
+#   # troque pdf.seudominio.com.br pelo seu domínio (com DNS apontando p/ a VM)
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d pdf.seudominio.com.br   # emite o certificado e
+#                                                   # reescreve este arquivo p/ 443
+#
+# Com este arquivo no ar, mantenha BIND_ADDRESS=127.0.0.1 no .env: o Nginx é a
+# única porta aberta (80/443) e o container continua inacessível diretamente.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name pdf.seudominio.com.br;
+
+    # HTML de entrada e PDF de saída podem ser grandes.
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # A renderização do Chromium pode passar de 60s em páginas pesadas.
+        proxy_connect_timeout 30s;
+        proxy_send_timeout    180s;
+        proxy_read_timeout    180s;
+
+        # Entrega o PDF sem bufferizar o corpo inteiro em disco.
+        proxy_buffering off;
+    }
+}

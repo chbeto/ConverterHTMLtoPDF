@@ -14,6 +14,7 @@ de cabeça com `libnss3` e afins.
 ## Sumário
 - [Pré-requisitos](#pré-requisitos)
 - [Como publicar (Docker)](#como-publicar-docker)
+- [Abrindo para conexões externas](#abrindo-para-conexões-externas)
 - [Endpoints](#endpoints)
 - [Integração com o n8n](#integração-com-o-n8n)
 - [Opções de PDF](#opções-de-pdf)
@@ -65,16 +66,99 @@ git pull
 docker compose up -d --build
 ```
 
-### Exposição da porta
+---
 
-Por padrão o `docker-compose.yml` publica a porta **apenas no localhost da VM**
-(`127.0.0.1:3000:3000`), pensando no cenário em que o n8n está na mesma máquina.
+## Abrindo para conexões externas
 
-- Para acessar de **outras máquinas**, troque para `"3000:3000"` e libere o
-  firewall (`ufw allow 3000`). Nesse caso, considere colocar atrás de um proxy
-  reverso (Nginx/Traefik) com HTTPS e autenticação.
-- Para uso **somente interno** (n8n em Docker na mesma VM), mantenha como está e
-  use a rede Docker compartilhada (veja abaixo).
+Por padrão a porta é publicada **apenas no localhost da VM**
+(`127.0.0.1:3000`), pensando no cenário em que o n8n está na mesma máquina.
+Para receber chamadas de fora, escolha um dos dois caminhos abaixo.
+
+Antes de qualquer coisa, crie o `.env`:
+
+```bash
+cp .env.example .env
+openssl rand -hex 32        # copie o resultado para API_KEY no .env
+```
+
+> **Sempre defina `API_KEY` ao expor externamente.** Sem ela, qualquer pessoa que
+> alcance a porta gera PDFs no seu servidor — e o HTML enviado pode fazer o
+> Chrome buscar URLs internas da sua rede (imagens, `iframe`, `fetch`) e embutir
+> o resultado no PDF. O serviço loga na subida se estiver sem autenticação.
+
+### Opção A — Nginx com HTTPS (recomendado)
+
+O container continua fechado no `127.0.0.1` e só o Nginx fica exposto (80/443),
+com certificado válido:
+
+```bash
+sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/html2pdf
+sudo nano /etc/nginx/sites-available/html2pdf     # troque o server_name
+sudo ln -s /etc/nginx/sites-available/html2pdf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d pdf.seudominio.com.br
+```
+
+No `.env`, mantenha `BIND_ADDRESS=127.0.0.1` e defina `TRUST_PROXY=1` (para o
+IP real do cliente aparecer nos logs). Aplique com `docker compose up -d`.
+
+Teste de fora da VM:
+```bash
+curl https://pdf.seudominio.com.br/health
+curl -X POST https://pdf.seudominio.com.br/convert \
+  -H "Content-Type: application/json" -H "x-api-key: SUA_CHAVE" \
+  -d '{"html":"<h1>Teste</h1>"}' --output teste.pdf
+```
+
+### Opção B — publicar a porta direto
+
+Sem domínio/HTTPS, expondo a `3000` na internet. No `.env`:
+
+```env
+BIND_ADDRESS=0.0.0.0
+HOST_PORT=3000
+API_KEY=sua_chave_gerada
+```
+
+```bash
+docker compose up -d
+sudo ufw allow 3000/tcp     # se o provedor também tiver firewall, libere lá
+```
+
+> ⚠️ **O `ufw` não protege portas publicadas pelo Docker.** O Docker escreve
+> regras de NAT no iptables que são avaliadas **antes** do ufw, então um
+> `ufw deny 3000` é ignorado — quem manda é o `BIND_ADDRESS`. Para fechar de
+> novo, volte para `127.0.0.1` e rode `docker compose up -d`.
+>
+> Nessa opção o tráfego (inclusive a `x-api-key`) trafega em HTTP puro. Prefira
+> a Opção A sempre que houver um domínio disponível.
+
+### Chamando de fora
+
+Todas as requisições a `/convert` precisam da chave quando `API_KEY` está
+definida — via header `x-api-key` ou `Authorization: Bearer`:
+
+```bash
+curl -X POST http://SEU_IP:3000/convert \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: SUA_CHAVE" \
+  -d '{"html":"<h1>Teste</h1>","filename":"teste.pdf"}' \
+  --output teste.pdf
+```
+
+`GET /health` fica aberto de propósito (healthcheck de proxy) e não devolve
+nada sensível. A página de teste em `/` mostra um campo para a chave quando o
+servidor exige autenticação.
+
+### Chamadas a partir de um navegador (CORS)
+
+Se uma página em outro domínio for chamar a API via `fetch`, libere a origem:
+
+```env
+CORS_ORIGIN=https://app.exemplo.com     # lista separada por vírgula, ou *
+```
+
+Sem isso, apenas clientes server-side (n8n, cURL, backends) conseguem chamar.
 
 ---
 
@@ -199,12 +283,25 @@ Repassadas ao Puppeteer dentro de `options`:
 
 ## Variáveis de ambiente
 
-| Variável     | Descrição                              | Padrão  |
-|--------------|----------------------------------------|---------|
-| `PORT`       | Porta HTTP                             | `3000`  |
-| `BODY_LIMIT` | Tamanho máximo do corpo da requisição  | `25mb`  |
+| Variável       | Descrição                                                        | Padrão      |
+|----------------|------------------------------------------------------------------|-------------|
+| `PORT`         | Porta HTTP                                                       | `3000`      |
+| `HOST`         | Interface de escuta do Node (dentro do container, deixe assim)    | `0.0.0.0`   |
+| `BODY_LIMIT`   | Tamanho máximo do corpo da requisição                            | `25mb`      |
+| `API_KEY`      | Se definida, `/convert` exige o header `x-api-key`               | — (aberto)  |
+| `CORS_ORIGIN`  | Origens liberadas para navegador (lista por vírgula, ou `*`)      | — (sem CORS)|
+| `TRUST_PROXY`  | Confiar no `X-Forwarded-For` (use `1` atrás de Nginx/Traefik)     | —           |
 
-Defina-as no bloco `environment` do `docker-compose.yml`.
+E, no `docker-compose.yml`, controlando a publicação da porta no host:
+
+| Variável       | Descrição                                                        | Padrão      |
+|----------------|------------------------------------------------------------------|-------------|
+| `BIND_ADDRESS` | `127.0.0.1` = só a VM · `0.0.0.0` = qualquer origem              | `127.0.0.1` |
+| `HOST_PORT`    | Porta publicada no host                                          | `3000`      |
+
+Defina tudo isso no arquivo `.env` na raiz do projeto (`cp .env.example .env`);
+o `docker compose` lê esse arquivo automaticamente. Depois de alterar, rode
+`docker compose up -d` para aplicar.
 
 ---
 
@@ -232,6 +329,10 @@ npm start            # ou: pm2 start npm --name html2pdf -- start
 | n8n: *"The value in the JSON Body field is not valid JSON"* | HTML com quebras de linha montado como texto. Use a expressão de objeto no body (seção n8n). |
 | n8n não conecta (`ECONNREFUSED`/timeout) | n8n em Docker usando `localhost`. Use o nome do container na rede compartilhada: `http://converter-html-to-pdf:3000/convert`. |
 | PDF vem corrompido / como texto | Faltou definir **Response Format = File** no nó HTTP Request. |
+| Chamada externa dá timeout / não conecta | Porta publicada só no localhost. Defina `BIND_ADDRESS=0.0.0.0` no `.env` (ou use Nginx) e confira também o firewall do provedor (Security Group / Cloud Firewall). |
+| `401 Não autorizado` em `/convert` | `API_KEY` está definida e a requisição não mandou o header `x-api-key` (no n8n: *Options → Headers*). |
+| Fechei com `ufw deny 3000` e continua acessível | Portas publicadas pelo Docker passam por cima do ufw. Volte `BIND_ADDRESS` para `127.0.0.1` e rode `docker compose up -d`. |
+| Navegador acusa erro de CORS | Defina `CORS_ORIGIN` com a origem da página que chama a API. |
 | `libnss3.so: cannot open shared object file` | Acontece em ambientes serverless/sem libs. A imagem Docker oficial usada aqui já resolve isso. Rodando sem Docker, instale as libs listadas acima. |
 
 Estrutura do projeto:
@@ -242,4 +343,6 @@ public/index.html   Página de teste com formulário
 scripts/test-local.js  Teste de renderização sem subir o servidor
 Dockerfile          Imagem baseada em ghcr.io/puppeteer/puppeteer
 docker-compose.yml  Orquestração + rede compartilhada com o n8n
+.env.example        Modelo de configuração (exposição, API_KEY, CORS)
+deploy/nginx.conf.example  Proxy reverso com HTTPS para acesso externo
 ```

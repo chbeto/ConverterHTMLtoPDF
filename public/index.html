@@ -29,14 +29,35 @@
     <button id="go">Gerar e baixar PDF</button>
   </div>
 
+  <div class="row" id="authRow" hidden>
+    <label for="apikey">Chave de API:</label>
+    <input type="password" id="apikey" placeholder="x-api-key" autocomplete="off" />
+    <span class="sub">Guardada só neste navegador.</span>
+  </div>
+
   <script>
+    const authRow = document.getElementById("authRow");
+    const keyInput = document.getElementById("apikey");
+    keyInput.value = localStorage.getItem("html2pdf_key") || "";
+
+    // Mostra o campo da chave só quando o servidor exige autenticação.
+    fetch("/health")
+      .then((r) => r.json())
+      .then((info) => { if (info.auth) authRow.hidden = false; })
+      .catch(() => {});
+
     const btn = document.getElementById("go");
     btn.addEventListener("click", async () => {
       btn.disabled = true; btn.textContent = "Gerando...";
       try {
+        const headers = { "Content-Type": "application/json" };
+        if (keyInput.value) {
+          headers["x-api-key"] = keyInput.value;
+          localStorage.setItem("html2pdf_key", keyInput.value);
+        }
         const resp = await fetch("/convert", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             html: document.getElementById("html").value,
             filename: document.getElementById("filename").value,
